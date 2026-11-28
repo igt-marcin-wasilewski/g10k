@@ -398,37 +398,28 @@ func (rt *Runtime) resolvePuppetfile(allPuppetfiles map[string]Puppetfile) error
 					targetDir = filepath.Join(basedir, normalizeDir(gitModule.installPath), gitName)
 				}
 				targetDir = normalizeDir(targetDir)
-				success := false
-
-				if gitModule.link {
-					rt.Debugf("Trying to resolve " + moduleCacheDir + " with branch " + tree)
-					gitModule.tree = tree
-					success = rt.syncToModuleDir(gitModule, moduleCacheDir, targetDir, env)
-				} else if gitModule.hasExplicitRef() {
-					// For non-link modules, try the primary tree when an explicit reference is set
-					// When branch/commit/tag/ref is set, it takes priority over the fallback/default_branch.
-					rt.Debugf("Trying to resolve " + moduleCacheDir + " with branch " + tree)
-					gitModule.tree = tree
-					success = rt.syncToModuleDir(gitModule, moduleCacheDir, targetDir, env)
+				tryTree := func(ref string) bool {
+					rt.Debugf("Trying to resolve " + moduleCacheDir + " with branch " + ref)
+					gitModule.tree = ref
+					return rt.syncToModuleDir(gitModule, moduleCacheDir, targetDir, env)
 				}
+
+				// An explicit branch/commit/tag/ref or link mode takes priority over fallback/default_branch.
+				// Without any of those, the detected default branch is tried only if no fallback is configured.
+				success := false
+				if gitModule.link || gitModule.hasExplicitRef() || len(gitModule.fallback) == 0 {
+					success = tryTree(tree)
+				}
+
 				if !success {
-					if len(gitModule.fallback) > 0 {
-						for i, fallbackBranch := range gitModule.fallback {
-							if i == len(gitModule.fallback)-1 {
-								// last try
-								gitModule.ignoreUnreachable = true
-							}
-							rt.Debugf("Trying to resolve " + moduleCacheDir + " with branch " + fallbackBranch)
-							gitModule.tree = fallbackBranch
-							success = rt.syncToModuleDir(gitModule, moduleCacheDir, targetDir, env)
-							if success {
-								break
-							}
+					for i, fallbackBranch := range gitModule.fallback {
+						if i == len(gitModule.fallback)-1 {
+							// last try
+							gitModule.ignoreUnreachable = true
 						}
-					} else {
-						rt.Debugf("Trying to resolve " + moduleCacheDir + " with branch " + tree)
-						gitModule.tree = tree
-						success = rt.syncToModuleDir(gitModule, moduleCacheDir, targetDir, env)
+						if success = tryTree(fallbackBranch); success {
+							break
+						}
 					}
 				}
 
